@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Boggle Chaos — Full Version</title>
+<style>
+html, body {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  color: #fff;
+  font-family: Arial;
+  display: grid;
+  grid-template-columns: 1fr 25vmin;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 10px;
+  overflow: hidden;
+}
+
+#board {
+  grid-column: 1;
+  grid-row: 2 / span 2;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 10px;
+  width: 70vmin;
+  height: 70vmin;
+  margin: auto;
+}
+
+.cell {
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 6vmin;
+  user-select: none;
+  cursor: pointer;
+}
+
+#controls {
+  grid-column: 1;
+  grid-row: 4;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 70vmin;
+  margin: auto;
+}
+
+#scoreContainer {
+  display: flex;
+  gap: 2rem;
+  font-size: 2.8vmin;
+}
+
+#wordInput {
+  width: 50%;
+  font-size: 2.4vmin;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: none;
+  outline: none;
+}
+
+#wordList {
+  grid-column: 2;
+  grid-row: 2 / span 3;
+  border: 1px solid #444;
+  border-radius: 10px;
+  background: #111;
+  padding: 8px;
+  overflow-y: auto;
+  font-size: 2vmin;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.95);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 5vmin;
+  z-index: 999;
+  text-align: center;
+  padding: 2rem;
+}
+
+#endText {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 8vmin;
+  font-weight: 900;
+  color: red;
+  text-align: center;
+  display: none;
+  z-index: 1000;
+  pointer-events: none;
+  line-height: 1.1;
+}
+
+label,input,button { font-size: 2vmin; margin: 0.3rem; }
+button { padding: 0.5rem 1rem; border-radius: 8px; border:none; cursor:pointer; background:#0f0; color:#000; font-weight:bold;}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div>
+    <p>Customize your Boggle board colors!</p>
+    <label>Cell Background:
+      <input type="color" id="cellBg" value="#222"/>
+    </label><br/>
+    <label>Cell Text:
+      <input type="color" id="cellText" value="#fff"/>
+    </label><br/><br/>
+    <button id="startBtn">Start Game</button>
+  </div>
+</div>
+
+<div id="timer">03:00</div>
+<div id="debug">Loading dictionary...</div>
+<div id="board"></div>
+
+<div id="controls">
+  <input id="wordInput" type="text" placeholder="Type a word and press Enter" autocomplete="off" autocapitalize="none" spellcheck="false"/>
+  <div id="scoreContainer">
+    <div id="score">Score: 0</div>
+    <div id="highScore">High Score: 0</div>
+  </div>
+</div>
+
+<div id="wordList"></div>
+<div id="endText"></div>
+
+<script src="dictionary.js"></script>
+<script>
+let dictionarySet = new Set(Object.keys(dictionary).map(w=>w.toLowerCase()));
+document.getElementById('debug').textContent = `Dictionary loaded! Words: ${dictionarySet.size}`;
+
+let dice = [
+  ['A','A','E','E','G','N'], ['E','L','R','T','T','Y'],
+  ['A','O','O','T','T','W'], ['A','B','B','J','O','O'],
+  ['E','H','R','T','V','W'], ['C','I','M','O','T','U'],
+  ['D','I','S','T','T','Y'], ['E','I','O','S','S','T'],
+  ['D','E','L','R','V','Y'], ['A','C','H','O','P','S'],
+  ['H','I','M','N','Qu','U'], ['E','E','I','N','S','U'],
+  ['E','E','G','H','N','W'], ['A','F','F','K','P','S'],
+  ['H','L','N','N','R','Z'], ['D','E','I','L','R','X']
+];
+
+let timerSeconds = 180;
+let timerInterval = null;
+let spinInterval = null;
+let totalScore = 0;
+let highScore = localStorage.getItem('boggleHighScore') ? parseInt(localStorage.getItem('boggleHighScore')) : 0;
+let foundWords = new Set();
+let cellBgColor = '#222';
+let cellTextColor = '#fff';
+let currentBoard = [];
+let tapWord = "";
+let autoSubmitTimeout = null;
+let currentPath = [];
+
+function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function pad(n){ return String(n).padStart(2,'0'); }
+function resetAutoSubmit(){
+  if(autoSubmitTimeout) clearTimeout(autoSubmitTimeout);
+  autoSubmitTimeout = setTimeout(()=>{
+    autoSubmitWord();
+  },750);
+}
+
+function createBoard(){
+  const boardDiv = document.getElementById('board');
+  boardDiv.innerHTML='';
+  currentBoard = [];
+  const shuffledDice = shuffle(dice);
+  for(let i=0;i<4;i++){
+    let row=[];
+    for(let j=0;j<4;j++){
+      const index = i*4 + j;
+      const letters = shuffledDice[index];
+      const chosen = letters[Math.floor(Math.random()*letters.length)];
+      const cell = document.createElement('div');
+      cell.className='cell';
+      cell.textContent = chosen;
+      cell.style.background = cellBgColor;
+      cell.style.color = cellTextColor;
+      cell.addEventListener('click', ()=>{
+        if(currentPath.length>0){
+          const last = currentPath[currentPath.length-1];
+          const dr = Math.abs(i-last[0]);
+          const dc = Math.abs(j-last[1]);
+          if(dr>1 || dc>1) return;
+        }
+        for(const p of currentPath){
+          if(p[0]===i && p[1]===j) return;
+        }
+        currentPath.push([i,j]);
+        tapWord += chosen.toLowerCase();
+        document.getElementById('wordInput').value = tapWord;
+        resetAutoSubmit();
+      });
+      boardDiv.appendChild(cell);
+      row.push(chosen.toLowerCase());
+    }
+    currentBoard.push(row);
+  }
+}
+
+function autoSubmitWord(){
+  const word = tapWord.trim().toLowerCase();
+  if(word && !foundWords.has(word) && dictionarySet.has(word) && isWordOnBoard(word)){
+    foundWords.add(word);
+    const points = Math.max(word.length-2,0);
+    updateScore(points);
+    const li = document.createElement('div');
+    li.textContent = word;
+    document.getElementById('wordList').appendChild(li);
+  }
+  tapWord='';
+  document.getElementById('wordInput').value='';
+  currentPath=[];
+}
+
+function startTimer(){
+  clearInterval(timerInterval);
+  timerSeconds = 180;
+  document.getElementById('timer').textContent = `03:00`;
+  timerInterval = setInterval(()=>{
+    timerSeconds--;
+    const m = Math.floor(timerSeconds/60), s = timerSeconds%60;
+    document.getElementById('timer').textContent = `${pad(m)}:${pad(s)}`;
+    if(timerSeconds <= 0){
+      clearInterval(timerInterval);
+      gameOver();
+    }
+  },1000);
+}
+
+function gameOver(){
+  clearInterval(timerInterval);
+  stopSpin();
+  const t = document.getElementById('endText');
+  t.textContent = 'PAY ATTENTION! BOGGLE DONE! BOGGLE DONE!';
+  t.style.display = 'block';
+  t.style.transform = 'translate(-50%,-50%) rotate(0deg)';
+  let angle = 0;
+  spinInterval = setInterval(()=>{angle = (angle+5)%360; t.style.transform=`translate(-50%, -50%) rotate(${angle}deg)`;},50);
+  const scoreText = document.createElement('div');
+  scoreText.style.fontSize='5vmin';
+  scoreText.style.color='yellow';
+  scoreText.style.marginTop='1rem';
+  scoreText.innerHTML=`Your Score: ${totalScore}<br/>High Score: ${highScore}`;
+  t.appendChild(scoreText);
+  if(totalScore>highScore){
+    highScore=totalScore;
+    localStorage.setItem('boggleHighScore', highScore);
+    scoreText.innerHTML+='<br/>New High Score! 🎉';
+    document.getElementById('highScore').textContent=`High Score: ${highScore} 🎉`;
+  }
+  const flashDuration=5140, flashIntervalTime=50; let elapsed=0; const body=document.body;
+  const flashInterval=setInterval(()=>{
+    body.style.background=getRandomColor(); body.style.color=getRandomColor(); elapsed+=flashIntervalTime;
+    if(elapsed>=flashDuration){clearInterval(flashInterval); body.style.background='#000'; body.style.color='#fff';}
+  },flashIntervalTime);
+}
+
+function getRandomColor(){ const r=Math.floor(Math.random()*256), g=Math.floor(Math.random()*256), b=Math.floor(Math.random()*256); return `rgb(${r},${g},${b})`; }
+function stopSpin(){if(spinInterval){clearInterval(spinInterval); spinInterval=null;}}
+
+function isWordOnBoard(word){
+  const visited=Array(4).fill(null).map(()=>Array(4).fill(false));
+  function dfs(r,c,index){
+    if(index===word.length) return true;
+    if(r<0||r>=4||c<0||c>=4) return false;
+    if(visited[r][c]) return false;
+    if(currentBoard[r][c]!==word[index]) return false;
+    visited[r][c]=true;
+    for(let dr=-1;dr<=1;dr++){for(let dc=-1;dc<=1;dc++){if(dr!==0||dc!==0){if(dfs(r+dr,c+dc,index+1)) return true;}}}
+    visited[r][c]=false;
+    return false;
+  }
+  for(let r=0;r<4;r++){for(let c=0;c<4;c++){if(dfs(r,c,0)) return true;}}
+  return false;
+}
+
+function updateScore(points){
+  totalScore += points;
+  document.getElementById('score').textContent = `Score: ${totalScore}`;
+  if(totalScore>highScore){
+    highScore=totalScore;
+    localStorage.setItem('boggleHighScore', highScore);
+    document.getElementById('highScore').textContent=`High Score: ${highScore} 🎉`;
+  }
+}
+
+// Typing input handler
+const wordInput = document.getElementById('wordInput');
+wordInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){
+    autoSubmitWord();
+  } else {
+    resetAutoSubmit();
+  }
+});
+
+// Start Game
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  cellBgColor=document.getElementById('cellBg').value;
+  cellTextColor=document.getElementById('cellText').value;
+  document.getElementById('overlay').style.display='none';
+  totalScore=0;
+  foundWords.clear();
+  document.getElementById('wordList').innerHTML='';
+  document.getElementById('score').textContent=`Score: 0`;
+  tapWord='';
+  currentPath=[];
+  createBoard();
+  startTimer();
+});
+
+// Reset on space
+document.addEventListener('keydown', e=>{
+  if(e.code==='Space'){
+    document.getElementById('endText').style.display='none';
+    document.getElementById('endText').innerHTML='';
+    totalScore=0;
+    foundWords.clear();
+    document.getElementById('wordList').innerHTML='';
+    document.getElementById('score').textContent=`Score: 0`;
+    tapWord='';
+    currentPath=[];
+    createBoard();
+    startTimer();
+  }
+});
+</script>
+</body>
+</html>
