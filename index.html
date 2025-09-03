@@ -37,7 +37,6 @@ html, body {
   font-weight: 800;
   font-size: 6vmin;
   user-select: none;
-  cursor: pointer;
 }
 
 #controls {
@@ -164,19 +163,14 @@ let foundWords = new Set();
 let cellBgColor = '#222';
 let cellTextColor = '#fff';
 let currentBoard = [];
-let tapWord = "";
-let autoSubmitTimeout = null;
-let currentPath = [];
 
-// ----------------------- HELPERS -----------------------
+// tap path state
+let currentPath = [];
+let tapTimer = null;
+
 function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function pad(n){ return String(n).padStart(2,'0'); }
-function resetAutoSubmit(){
-  if(autoSubmitTimeout) clearTimeout(autoSubmitTimeout);
-  autoSubmitTimeout = setTimeout(autoSubmitWord, 750); // auto-submit after 0.75s
-}
 
-// ----------------------- BOARD -----------------------
 function createBoard(){
   const boardDiv = document.getElementById('board');
   boardDiv.innerHTML='';
@@ -193,20 +187,9 @@ function createBoard(){
       cell.textContent = chosen;
       cell.style.background = cellBgColor;
       cell.style.color = cellTextColor;
-
-      cell.addEventListener('click', ()=>{
-        if(currentPath.length>0){
-          const last = currentPath[currentPath.length-1];
-          const dr = Math.abs(i-last[0]);
-          const dc = Math.abs(j-last[1]);
-          if(dr>1 || dc>1) return;
-        }
-        for(const p of currentPath){ if(p[0]===i && p[1]===j) return; }
-        currentPath.push([i,j]);
-        tapWord += chosen.toLowerCase();
-        resetAutoSubmit();
-      });
-
+      cell.dataset.row=i;
+      cell.dataset.col=j;
+      cell.addEventListener('click', onCellTap);
       boardDiv.appendChild(cell);
       row.push(chosen.toLowerCase());
     }
@@ -214,22 +197,6 @@ function createBoard(){
   }
 }
 
-// ----------------------- AUTO SUBMIT TAP WORD -----------------------
-function autoSubmitWord(){
-  const word = tapWord.trim().toLowerCase();
-  if(word && !foundWords.has(word) && dictionarySet.has(word) && isWordOnBoard(word)){
-    foundWords.add(word);
-    const points = Math.max(word.length-2,0);
-    updateScore(points);
-    const li = document.createElement('div');
-    li.textContent = word;
-    document.getElementById('wordList').appendChild(li);
-  }
-  tapWord='';
-  currentPath=[];
-}
-
-// ----------------------- TIMER -----------------------
 function startTimer(){
   clearInterval(timerInterval);
   timerSeconds = 180;
@@ -238,43 +205,34 @@ function startTimer(){
     timerSeconds--;
     const m = Math.floor(timerSeconds/60), s = timerSeconds%60;
     document.getElementById('timer').textContent = `${pad(m)}:${pad(s)}`;
-    if(timerSeconds <= 0){
-      clearInterval(timerInterval);
-      gameOver();
-    }
+    if(timerSeconds <= 0){ clearInterval(timerInterval); gameOver(); }
   },1000);
 }
 
-// ----------------------- GAME OVER -----------------------
 function gameOver(){
   clearInterval(timerInterval);
   stopSpin();
-
   const t = document.getElementById('endText');
   t.textContent = 'PAY ATTENTION! BOGGLE DONE! BOGGLE DONE!';
   t.style.display = 'block';
   t.style.transform = 'translate(-50%,-50%) rotate(0deg)';
-
   let angle = 0;
   spinInterval = setInterval(()=>{
     angle = (angle + 5) % 360;
     t.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
   },50);
-
   const scoreText = document.createElement('div');
   scoreText.style.fontSize = '5vmin';
   scoreText.style.color = 'yellow';
   scoreText.style.marginTop = '1rem';
   scoreText.innerHTML = `Your Score: ${totalScore}<br/>High Score: ${highScore}`;
   t.appendChild(scoreText);
-
   if(totalScore > highScore){
     highScore = totalScore;
     localStorage.setItem('boggleHighScore', highScore);
     scoreText.innerHTML += '<br/>New High Score! 🎉';
     document.getElementById('highScore').textContent = `High Score: ${highScore} 🎉`;
   }
-
   const flashDuration = 5140;
   const flashIntervalTime = 50;
   const body = document.body;
@@ -300,10 +258,8 @@ function getRandomColor(){
 
 function stopSpin(){ if(spinInterval){ clearInterval(spinInterval); spinInterval=null; } }
 
-// ----------------------- WORD CHECK -----------------------
 function isWordOnBoard(word){
   const visited = Array(4).fill(null).map(()=>Array(4).fill(false));
-
   function dfs(r,c,index){
     if(index===word.length) return true;
     if(r<0||r>=4||c<0||c>=4) return false;
@@ -312,15 +268,12 @@ function isWordOnBoard(word){
     visited[r][c]=true;
     for(let dr=-1; dr<=1; dr++){
       for(let dc=-1; dc<=1; dc++){
-        if(dr!==0 || dc!==0){
-          if(dfs(r+dr,c+dc,index+1)) return true;
-        }
+        if(dr!==0 || dc!==0){ if(dfs(r+dr,c+dc,index+1)) return true; }
       }
     }
     visited[r][c]=false;
     return false;
   }
-
   for(let r=0;r<4;r++){
     for(let c=0;c<4;c++){
       if(dfs(r,c,0)) return true;
@@ -329,7 +282,27 @@ function isWordOnBoard(word){
   return false;
 }
 
-// ----------------------- SCORE -----------------------
+function submitWord(word){
+  if(!word) return;
+  if(foundWords.has(word)) return;
+  if(dictionarySet.has(word) && isWordOnBoard(word)){
+    foundWords.add(word);
+    const points = Math.max(word.length-2,0);
+    updateScore(points);
+    const li = document.createElement('div');
+    li.textContent = word;
+    document.getElementById('wordList').appendChild(li);
+  }
+}
+
+document.getElementById('wordInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){
+    const word = e.target.value.trim().toLowerCase();
+    submitWord(word);
+    e.target.value='';
+  }
+});
+
 function updateScore(points){
   totalScore += points;
   document.getElementById('score').textContent = `Score: ${totalScore}`;
@@ -340,24 +313,31 @@ function updateScore(points){
   }
 }
 
-// ----------------------- TYPING INPUT -----------------------
-const wordInput = document.getElementById('wordInput');
-wordInput.addEventListener('keydown', e=>{
-  if(e.key==='Enter'){
-    const word = wordInput.value.trim().toLowerCase();
-    if(word && !foundWords.has(word) && dictionarySet.has(word) && isWordOnBoard(word)){
-      foundWords.add(word);
-      const points = Math.max(word.length-2,0);
-      updateScore(points);
-      const li = document.createElement('div');
-      li.textContent = word;
-      document.getElementById('wordList').appendChild(li);
-    }
-    wordInput.value='';
+// ---- TAP HANDLING ----
+function onCellTap(e){
+  const r = parseInt(e.target.dataset.row);
+  const c = parseInt(e.target.dataset.col);
+  if(currentPath.length>0){
+    const last = currentPath[currentPath.length-1];
+    const dr = Math.abs(last.r - r);
+    const dc = Math.abs(last.c - c);
+    if(dr>1 || dc>1) return; // must be adjacent, including diagonals
+    if(currentPath.some(p=>p.r===r && p.c===c)) return; // no reuse
   }
-});
+  currentPath.push({r,c,letter:currentBoard[r][c]});
+  resetTapTimer();
+}
 
-// ----------------------- START GAME -----------------------
+function resetTapTimer(){
+  clearTimeout(tapTimer);
+  tapTimer = setTimeout(()=>{
+    const word = currentPath.map(p=>p.letter).join('');
+    submitWord(word);
+    currentPath = [];
+  }, 750);
+}
+
+// ---- START ----
 document.getElementById('startBtn').addEventListener('click', ()=>{
   cellBgColor = document.getElementById('cellBg').value;
   cellTextColor = document.getElementById('cellText').value;
@@ -366,23 +346,18 @@ document.getElementById('startBtn').addEventListener('click', ()=>{
   foundWords.clear();
   document.getElementById('wordList').innerHTML='';
   document.getElementById('score').textContent=`Score: 0`;
-  tapWord='';
-  currentPath=[];
   createBoard();
   startTimer();
 });
 
-// ----------------------- RESET ON SPACE -----------------------
 document.addEventListener('keydown', e=>{
   if(e.code==='Space'){
-    document.getElementById('endText').style.display='none';
-    document.getElementById('endText').innerHTML=''; 
+    const oldEnd = document.getElementById('endText');
+    if(oldEnd){ oldEnd.style.display='none'; oldEnd.innerHTML=''; }
     totalScore=0;
     foundWords.clear();
     document.getElementById('wordList').innerHTML='';
     document.getElementById('score').textContent=`Score: 0`;
-    tapWord='';
-    currentPath=[];
     createBoard();
     startTimer();
   }
