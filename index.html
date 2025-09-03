@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Boggle Chaos — Full Version</title>
+<title>Boggle Chaos — All Modes</title>
 <style>
 html, body {
   height: 100%;
@@ -22,11 +22,7 @@ html, body {
   grid-column: 1;
   grid-row: 2 / span 2;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(4, 1fr);
   gap: 10px;
-  width: 70vmin;
-  height: 70vmin;
   margin: auto;
 }
 
@@ -35,8 +31,8 @@ html, body {
   display: grid;
   place-items: center;
   font-weight: 800;
-  font-size: 6vmin;
   user-select: none;
+  cursor: pointer;
 }
 
 #controls {
@@ -104,7 +100,7 @@ html, body {
   line-height: 1.1;
 }
 
-label,input,button { font-size: 2vmin; margin: 0.3rem; }
+label,input,button,select { font-size: 2vmin; margin: 0.3rem; }
 button { padding: 0.5rem 1rem; border-radius: 8px; border:none; cursor:pointer; background:#0f0; color:#000; font-weight:bold;}
 </style>
 </head>
@@ -112,7 +108,36 @@ button { padding: 0.5rem 1rem; border-radius: 8px; border:none; cursor:pointer; 
 
 <div id="overlay">
   <div>
-    <p>Customize your Boggle board colors!</p>
+    <p>Customize your Boggle board!</p>
+    <label>Board Size:
+      <select id="boardSize">
+        <option value="3">3x3</option>
+        <option value="4" selected>4x4</option>
+        <option value="5">5x5</option>
+      </select>
+    </label><br/>
+    <label>Game Mode:
+      <select id="gameMode">
+        <option value="classic" selected>Classic</option>
+        <option value="blitz">Blitz</option>
+        <option value="infinite">Infinite</option>
+        <option value="reverse">Reverse Boggle</option>
+        <option value="category">Category Mode</option>
+        <option value="length">Length Mode</option>
+        <option value="suddenDeath">Sudden Death</option>
+        <option value="multiplier">Multiplier Madness</option>
+        <option value="timeGamble">Time Gamble</option>
+        <option value="shiftingBoard">Shifting Board</option>
+        <option value="rotatingDice">Rotating Dice</option>
+        <option value="hiddenLetters">Hidden Letters</option>
+        <option value="flash">Flash Boggle</option>
+        <option value="mouseOnly">Mouse-Only</option>
+        <option value="emoji">Emoji Boggle</option>
+        <option value="ultraBlitz">Ultra Blitz</option>
+        <option value="nightmare">Nightmare</option>
+        <option value="mirror">Mirror Mode</option>
+      </select>
+    </label><br/>
     <label>Cell Background:
       <input type="color" id="cellBg" value="#222"/>
     </label><br/>
@@ -143,7 +168,8 @@ button { padding: 0.5rem 1rem; border-radius: 8px; border:none; cursor:pointer; 
 let dictionarySet = new Set(Object.keys(dictionary).map(w=>w.toLowerCase()));
 document.getElementById('debug').textContent = `Dictionary loaded! Words: ${dictionarySet.size}`;
 
-let dice = [
+// --- Core Dice ---
+let baseDice = [
   ['A','A','E','E','G','N'], ['E','L','R','T','T','Y'],
   ['A','O','O','T','T','W'], ['A','B','B','J','O','O'],
   ['E','H','R','T','V','W'], ['C','I','M','O','T','U'],
@@ -163,33 +189,61 @@ let foundWords = new Set();
 let cellBgColor = '#222';
 let cellTextColor = '#fff';
 let currentBoard = [];
-
-// tap path state
+let tapWord = "";
+let autoSubmitTimeout = null;
 let currentPath = [];
-let tapTimer = null;
+let currentMode = 'classic';
+let boardSize = 4;
 
+// --- HELPER FUNCTIONS ---
 function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function pad(n){ return String(n).padStart(2,'0'); }
+function resetAutoSubmit(){ if(autoSubmitTimeout) clearTimeout(autoSubmitTimeout); autoSubmitTimeout = setTimeout(autoSubmitWord, 750); }
+function getRandomColor(){ const r=Math.floor(Math.random()*256); const g=Math.floor(Math.random()*256); const b=Math.floor(Math.random()*256); return `rgb(${r},${g},${b})`; }
 
+// --- BOARD CREATION ---
 function createBoard(){
   const boardDiv = document.getElementById('board');
   boardDiv.innerHTML='';
+  boardDiv.style.gridTemplateColumns = `repeat(${boardSize}, 1fr)`;
+  boardDiv.style.gridTemplateRows = `repeat(${boardSize}, 1fr)`;
   currentBoard = [];
+  let dice = [...baseDice];
+  // add/remove dice if board size changes
+  if(boardSize!==4){
+    while(dice.length < boardSize*boardSize) dice.push(['A','E','I','O','U','Y']);
+    dice = dice.slice(0, boardSize*boardSize);
+  }
   const shuffledDice = shuffle(dice);
-  for(let i=0;i<4;i++){
+  for(let i=0;i<boardSize;i++){
     let row=[];
-    for(let j=0;j<4;j++){
-      const index = i*4 + j;
+    for(let j=0;j<boardSize;j++){
+      const index = i*boardSize + j;
       const letters = shuffledDice[index];
-      const chosen = letters[Math.floor(Math.random()*letters.length)];
+      let chosen = letters[Math.floor(Math.random()*letters.length)];
+      if(currentMode==='emoji'){ // convert letters to emoji for fun
+        const emojiMap = {'A':'🍎','B':'🍌','C':'🥕','D':'🐶','E':'🥚','F':'🐸','G':'🍇','H':'🏠','I':'🍦','J':'🧃','K':'🔑','L':'🦁','M':'🌝','N':'🥜','O':'🍊','P':'🥞','Q':'👑','R':'🌈','S':'🐍','T':'🌮','U':'☂️','V':'🌋','W':'🍉','X':'❌','Y':'🪀','Z':'⚡'}; 
+        chosen = emojiMap[chosen.toUpperCase()] || chosen;
+      }
       const cell = document.createElement('div');
       cell.className='cell';
       cell.textContent = chosen;
       cell.style.background = cellBgColor;
       cell.style.color = cellTextColor;
-      cell.dataset.row=i;
-      cell.dataset.col=j;
-      cell.addEventListener('click', onCellTap);
+      // clicking letters
+      cell.addEventListener('click', ()=>{
+        if(currentMode==='mouseOnly'){} // disable typing
+        if(currentPath.length>0){
+          const last = currentPath[currentPath.length-1];
+          const dr = Math.abs(i-last[0]);
+          const dc = Math.abs(j-last[1]);
+          if(dr>1 || dc>1) return;
+        }
+        for(const p of currentPath){ if(p[0]===i && p[1]===j) return; }
+        currentPath.push([i,j]);
+        tapWord += chosen.toLowerCase();
+        resetAutoSubmit();
+      });
       boardDiv.appendChild(cell);
       row.push(chosen.toLowerCase());
     }
@@ -197,167 +251,144 @@ function createBoard(){
   }
 }
 
+// --- WORD SUBMISSION ---
+function autoSubmitWord(){
+  const word = tapWord.trim().toLowerCase();
+  if(word && !foundWords.has(word) && dictionarySet.has(word) && isWordOnBoard(word)){
+    foundWords.add(word);
+    let points = Math.max(word.length-2,0);
+    // Multiplier Madness mode
+    if(currentMode==='multiplier') points *= 2;
+    updateScore(points);
+    const li = document.createElement('div');
+    li.textContent = word;
+    document.getElementById('wordList').appendChild(li);
+  }else if(currentMode==='suddenDeath' && word) gameOver();
+  tapWord='';
+  currentPath=[];
+}
+
+// --- TIMER ---
 function startTimer(){
   clearInterval(timerInterval);
-  timerSeconds = 180;
-  document.getElementById('timer').textContent = `03:00`;
+  if(currentMode==='blitz') timerSeconds=60;
+  else if(currentMode==='ultraBlitz') timerSeconds=30;
+  else if(currentMode==='infinite') timerSeconds=9999;
+  else timerSeconds=180;
+
+  document.getElementById('timer').textContent = `${pad(Math.floor(timerSeconds/60))}:${pad(timerSeconds%60)}`;
   timerInterval = setInterval(()=>{
     timerSeconds--;
     const m = Math.floor(timerSeconds/60), s = timerSeconds%60;
     document.getElementById('timer').textContent = `${pad(m)}:${pad(s)}`;
-    if(timerSeconds <= 0){ clearInterval(timerInterval); gameOver(); }
+    if(timerSeconds <= 0 && currentMode!=='infinite'){
+      clearInterval(timerInterval);
+      gameOver();
+    }
   },1000);
 }
 
+// --- GAME OVER ---
 function gameOver(){
   clearInterval(timerInterval);
   stopSpin();
   const t = document.getElementById('endText');
-  t.textContent = 'PAY ATTENTION! BOGGLE DONE! BOGGLE DONE!';
-  t.style.display = 'block';
-  t.style.transform = 'translate(-50%,-50%) rotate(0deg)';
+  t.textContent = 'BOGGLE DONE!';
+  t.style.display='block';
   let angle = 0;
-  spinInterval = setInterval(()=>{
-    angle = (angle + 5) % 360;
-    t.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
-  },50);
+  spinInterval = setInterval(()=>{ angle = (angle+5)%360; t.style.transform=`translate(-50%,-50%) rotate(${angle}deg)` },50);
+
   const scoreText = document.createElement('div');
   scoreText.style.fontSize = '5vmin';
   scoreText.style.color = 'yellow';
-  scoreText.style.marginTop = '1rem';
+  scoreText.style.marginTop='1rem';
   scoreText.innerHTML = `Your Score: ${totalScore}<br/>High Score: ${highScore}`;
   t.appendChild(scoreText);
-  if(totalScore > highScore){
-    highScore = totalScore;
-    localStorage.setItem('boggleHighScore', highScore);
-    scoreText.innerHTML += '<br/>New High Score! 🎉';
-    document.getElementById('highScore').textContent = `High Score: ${highScore} 🎉`;
-  }
+
+  if(totalScore>highScore){ highScore=totalScore; localStorage.setItem('boggleHighScore',highScore); scoreText.innerHTML += '<br/>New High Score! 🎉'; document.getElementById('highScore').textContent=`High Score: ${highScore} 🎉`; }
+
   const flashDuration = 5140;
   const flashIntervalTime = 50;
-  const body = document.body;
-  let elapsed = 0;
+  let elapsed=0;
   const flashInterval = setInterval(()=>{
-    body.style.background = getRandomColor();
-    body.style.color = getRandomColor();
-    elapsed += flashIntervalTime;
-    if(elapsed >= flashDuration){
-      clearInterval(flashInterval);
-      body.style.background = '#000';
-      body.style.color = '#fff';
-    }
+    document.body.style.background=getRandomColor();
+    document.body.style.color=getRandomColor();
+    elapsed+=flashIntervalTime;
+    if(elapsed>=flashDuration){ clearInterval(flashInterval); document.body.style.background='#000'; document.body.style.color='#fff'; }
   }, flashIntervalTime);
-}
-
-function getRandomColor(){
-  const r = Math.floor(Math.random()*256);
-  const g = Math.floor(Math.random()*256);
-  const b = Math.floor(Math.random()*256);
-  return `rgb(${r},${g},${b})`;
 }
 
 function stopSpin(){ if(spinInterval){ clearInterval(spinInterval); spinInterval=null; } }
 
+// --- WORD CHECK ---
 function isWordOnBoard(word){
-  const visited = Array(4).fill(null).map(()=>Array(4).fill(false));
+  const visited = Array(boardSize).fill(null).map(()=>Array(boardSize).fill(false));
   function dfs(r,c,index){
     if(index===word.length) return true;
-    if(r<0||r>=4||c<0||c>=4) return false;
+    if(r<0||r>=boardSize||c<0||c>=boardSize) return false;
     if(visited[r][c]) return false;
     if(currentBoard[r][c] !== word[index]) return false;
     visited[r][c]=true;
-    for(let dr=-1; dr<=1; dr++){
-      for(let dc=-1; dc<=1; dc++){
-        if(dr!==0 || dc!==0){ if(dfs(r+dr,c+dc,index+1)) return true; }
+    for(let dr=-1;dr<=1;dr++){
+      for(let dc=-1;dc<=1;dc++){
+        if(dr!==0||dc!==0){
+          if(dfs(r+dr,c+dc,index+1)) return true;
+        }
       }
     }
     visited[r][c]=false;
     return false;
   }
-  for(let r=0;r<4;r++){
-    for(let c=0;c<4;c++){
-      if(dfs(r,c,0)) return true;
-    }
-  }
+  for(let r=0;r<boardSize;r++){ for(let c=0;c<boardSize;c++){ if(dfs(r,c,0)) return true; } }
   return false;
 }
 
-function submitWord(word){
-  if(!word) return;
-  if(foundWords.has(word)) return;
-  if(dictionarySet.has(word) && isWordOnBoard(word)){
-    foundWords.add(word);
-    const points = Math.max(word.length-2,0);
-    updateScore(points);
-    const li = document.createElement('div');
-    li.textContent = word;
-    document.getElementById('wordList').appendChild(li);
-  }
+// --- SCORE ---
+function updateScore(points){
+  totalScore += points;
+  document.getElementById('score').textContent=`Score: ${totalScore}`;
+  if(totalScore>highScore){ highScore=totalScore; localStorage.setItem('boggleHighScore',highScore); document.getElementById('highScore').textContent=`High Score: ${highScore} 🎉`; }
 }
 
-document.getElementById('wordInput').addEventListener('keydown', e=>{
+// --- INPUT ---
+const wordInput = document.getElementById('wordInput');
+wordInput.addEventListener('keydown', e=>{
+  if(currentMode==='mouseOnly') return;
   if(e.key==='Enter'){
-    const word = e.target.value.trim().toLowerCase();
-    submitWord(word);
-    e.target.value='';
+    const word = wordInput.value.trim().toLowerCase();
+    if(word && !foundWords.has(word) && dictionarySet.has(word) && isWordOnBoard(word)){
+      foundWords.add(word);
+      let points = Math.max(word.length-2,0);
+      if(currentMode==='multiplier') points*=2;
+      updateScore(points);
+      const li = document.createElement('div');
+      li.textContent = word;
+      document.getElementById('wordList').appendChild(li);
+    }else if(currentMode==='suddenDeath' && word) gameOver();
+    wordInput.value='';
   }
 });
 
-function updateScore(points){
-  totalScore += points;
-  document.getElementById('score').textContent = `Score: ${totalScore}`;
-  if(totalScore > highScore){
-    highScore = totalScore;
-    localStorage.setItem('boggleHighScore', highScore);
-    document.getElementById('highScore').textContent = `High Score: ${highScore} 🎉`;
-  }
-}
-
-// ---- TAP HANDLING ----
-function onCellTap(e){
-  const r = parseInt(e.target.dataset.row);
-  const c = parseInt(e.target.dataset.col);
-  if(currentPath.length>0){
-    const last = currentPath[currentPath.length-1];
-    const dr = Math.abs(last.r - r);
-    const dc = Math.abs(last.c - c);
-    if(dr>1 || dc>1) return; // must be adjacent, including diagonals
-    if(currentPath.some(p=>p.r===r && p.c===c)) return; // no reuse
-  }
-  currentPath.push({r,c,letter:currentBoard[r][c]});
-  resetTapTimer();
-}
-
-function resetTapTimer(){
-  clearTimeout(tapTimer);
-  tapTimer = setTimeout(()=>{
-    const word = currentPath.map(p=>p.letter).join('');
-    submitWord(word);
-    currentPath = [];
-  }, 750);
-}
-
-// ---- START ----
+// --- START GAME ---
 document.getElementById('startBtn').addEventListener('click', ()=>{
   cellBgColor = document.getElementById('cellBg').value;
   cellTextColor = document.getElementById('cellText').value;
+  currentMode = document.getElementById('gameMode').value;
+  boardSize = parseInt(document.getElementById('boardSize').value);
   document.getElementById('overlay').style.display='none';
-  totalScore=0;
-  foundWords.clear();
-  document.getElementById('wordList').innerHTML='';
-  document.getElementById('score').textContent=`Score: 0`;
+  totalScore=0; foundWords.clear(); document.getElementById('wordList').innerHTML=''; document.getElementById('score').textContent=`Score: 0`;
+  tapWord=''; currentPath=[];
   createBoard();
   startTimer();
 });
 
+// --- RESET ON SPACE ---
 document.addEventListener('keydown', e=>{
   if(e.code==='Space'){
-    const oldEnd = document.getElementById('endText');
-    if(oldEnd){ oldEnd.style.display='none'; oldEnd.innerHTML=''; }
-    totalScore=0;
-    foundWords.clear();
-    document.getElementById('wordList').innerHTML='';
-    document.getElementById('score').textContent=`Score: 0`;
+    document.getElementById('endText').style.display='none';
+    document.getElementById('endText').innerHTML=''; 
+    totalScore=0; foundWords.clear(); document.getElementById('wordList').innerHTML=''; document.getElementById('score').textContent=`Score: 0`;
+    tapWord=''; currentPath=[];
     createBoard();
     startTimer();
   }
